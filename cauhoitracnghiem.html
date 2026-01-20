@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Quiz Player</title>
+    
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&display=swap');
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Nunito', sans-serif; -webkit-tap-highlight-color: transparent; }
+        
+        body {
+            background: linear-gradient(-45deg, #ee7752, #e73c7e, #23a6d5, #23d5ab);
+            background-size: 400% 400%;
+            animation: gradientBG 15s ease infinite;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+        @keyframes gradientBG { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.2);
+            width: 90%;
+            max-width: 480px;
+            min-height: 400px; /* Gọn hơn vì không cần chỗ cho BXH */
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            padding-bottom: 20px;
+        }
+
+        .screen { display: none; padding: 2rem; flex: 1; flex-direction: column; justify-content: center; animation: fadeIn 0.5s ease; }
+        .screen.active { display: flex; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Login */
+        .login-box { text-align: center; }
+        .logo-text { font-size: 3rem; font-weight: 900; color: #e73c7e; margin-bottom: 10px; }
+        input[type="text"] { width: 100%; padding: 15px; margin: 20px 0; border: 2px solid #ddd; border-radius: 12px; font-size: 1.1rem; text-align: center; outline: none; }
+        input[type="text"]:focus { border-color: #23a6d5; }
+        .btn { background: linear-gradient(to right, #23a6d5, #23d5ab); color: white; border: none; padding: 15px; width: 100%; border-radius: 50px; font-size: 1.2rem; font-weight: 800; cursor: pointer; box-shadow: 0 5px 15px rgba(35, 213, 171, 0.4); }
+        .btn:active { transform: scale(0.95); }
+
+        /* Quiz */
+        .quiz-header h2 { font-size: 1.4rem; margin-bottom: 2rem; text-align: center; color: #333; font-weight: 700; }
+        ul { display: flex; flex-direction: column; gap: 15px; }
+        ul li { list-style: none; padding: 15px; border: 2px solid #f0f0f0; border-radius: 12px; font-weight: 600; cursor: pointer; background: white; transition: 0.2s; }
+        ul li:hover { border-color: #23a6d5; transform: translateX(5px); }
+        ul li.correct { background: #d4edda; border-color: #28a745; color: #155724; }
+        ul li.wrong { background: #f8d7da; border-color: #dc3545; color: #721c24; }
+        ul.disabled li { pointer-events: none; opacity: 0.6; }
+
+        /* Result Screen (Đã bỏ BXH) */
+        .result-box { text-align: center; }
+        .score-circle { width: 150px; height: 150px; border-radius: 50%; background: linear-gradient(to bottom right, #e73c7e, #ee7752); display: flex; justify-content: center; align-items: center; margin: 0 auto 20px; color: white; font-size: 3.5rem; font-weight: 900; box-shadow: 0 10px 20px rgba(231, 60, 126, 0.4); }
+        .info-text { color: #555; margin-top: 20px; font-size: 1.1rem; }
+        .sv-msg { background: #f1f2f6; padding: 15px; border-radius: 10px; margin-top: 20px; font-size: 0.9rem; color: #2f3542; }
+
+        /* Loading */
+        #loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: white; z-index: 99; display: flex; justify-content: center; align-items: center; transition: opacity 0.5s; }
+        .progress-container { height: 8px; background: #f0f0f0; width: 100%; position: absolute; top: 0; left: 0; }
+        .progress-fill { height: 100%; background: linear-gradient(to right, #23a6d5, #23d5ab); width: 0%; transition: width 0.4s ease; }
+    </style>
+</head>
+<body>
+
+<div id="loading"><h2 style="color:#23a6d5">Đang kết nối...</h2></div>
+
+<div class="container">
+    <div class="progress-container"><div class="progress-fill" id="progressFill"></div></div>
+
+    <div id="screen-login" class="screen active">
+        <div class="login-box">
+            <div class="logo-text">GAME<br>ONLINE</div>
+            <p style="color: #777;">Nhập tên để tham gia</p>
+            <input type="text" id="username" placeholder="Tên của bạn...">
+            <button class="btn" onclick="startQuiz()">BẮT ĐẦU 🚀</button>
+        </div>
+    </div>
+
+    <div id="screen-quiz" class="screen">
+        <div class="quiz-header">
+            <h2 id="questionText">Câu hỏi...</h2>
+            <ul id="optionsList"></ul>
+        </div>
+    </div>
+
+    <div id="screen-result" class="screen">
+        <div class="result-box">
+            <p style="color: #888; font-weight: bold; margin-bottom: 10px;">KẾT QUẢ CỦA BẠN</p>
+            <div class="score-circle" id="finalScore">?</div>
+            <h2 style="color: #333;">Hoàn thành!</h2>
+            
+            <div class="sv-msg">
+                Dữ liệu đã được gửi lên hệ thống.<br>
+                <b>👀 Hãy nhìn lên Màn hình chính để xem Thứ hạng!</b>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // -----------------------------------------------------------------
+    // 1. CẤU HÌNH FIREBASE (DÁN CONFIG CỦA BẠN VÀO ĐÂY)
+    // -----------------------------------------------------------------
+    const firebaseConfig = {
+        apiKey: "AIzaSyBpECks4WVAmu52z88_XBUpIkStvAddnHc",
+        authDomain: "gametracnghiem-eb3bc.firebaseapp.com",
+        projectId: "gametracnghiem-eb3bc",
+        storageBucket: "gametracnghiem-eb3bc.firebasestorage.app",
+        messagingSenderId: "971086229473",
+        appId: "1:971086229473:web:5cd29727f0e92c61b96ca0"
+    };
+
+    if (!firebaseConfig.apiKey) alert("Chưa nhập Firebase Config!");
+    else firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // -----------------------------------------------------------------
+    // 2. DATA CÂU HỎI
+    // -----------------------------------------------------------------
+    const quizData = [
+        { q: "Câu 1. Thừa kế được hiểu đúng nhất là: ", 
+        a: [
+            "A. Việc phân chia tài sản chung của gia đình.",
+            "B. Việc chuyển dịch di sản của người chết cho người còn sống theo di chúc hoặc theo pháp luật.", 
+            "C. Việc chuyển dịch tài sản của người còn sống cho người khác ", 
+            "D. Việc Nhà nước thu hồi tài sản của cá nhân "
+        ], 
+        correct: 1 },
+
+        { q: "Câu 2. Di sản thừa kế theo quy định của pháp luật không bao gồm nội dung nào sau đây? ", 
+        a: [
+            "A. Tài sản riêng của người chết", 
+            "B. Phần tài sản của người chết trong tài sản chung", 
+            "C. Quyền sử dụng đất", 
+            "D. Các quyền, nghĩa vụ gắn liền với nhân thân của người chết"
+        ], 
+        correct: 3 },
+
+        { q: "Câu 3. Người thừa kế không phụ thuộc vào nội dung di chúc theo Bộ luật Dân sự năm 2015 bao gồm: ", 
+        a: [
+            "A. Anh, chị, em ruột của người chết", 
+            "B. Con đã thành niên và có khả năng lao động", 
+            "C. Con chưa thành niên; cha, mẹ; vợ, chồng của người chết", 
+            "D. Cháu ruột của người chết"
+        ], 
+        correct: 2 },
+
+        { q: "Câu 4. Thừa kế theo pháp luật được áp dụng trong trường hợp nào sau đây? ", 
+        a: [
+            "A. Có di chúc hợp pháp", 
+            "B. Có di chúc nhưng người lập di chúc còn sống", 
+            "C. Không có di chúc hoặc di chúc không hợp pháp", 
+            "D. Di chúc có người làm chứng"
+        ], 
+        correct: 2 },
+
+        { q: "Câu 5. Theo quy định của pháp luật, hàng thừa kế thứ nhất bao gồm: ", 
+        a: [
+            "A. Ông bà nội, ngoại và anh chị em ruột", 
+            "B. Vợ, chồng, cha mẹ, con của người chết", 
+            "C. Cô, dì, chú, bác ruột của người chết", 
+            "D. Cháu ruột của người chết"
+        ], 
+        correct: 1 }
+    ];
+
+    // -----------------------------------------------------------------
+    // 3. LOGIC HỆ THỐNG (Có chặn chơi lại)
+    // -----------------------------------------------------------------
+    window.onload = () => {
+        // Kiểm tra đã chơi chưa
+        const hasPlayed = localStorage.getItem('quiz_played_status');
+        const savedScore = localStorage.getItem('quiz_score');
+
+        if (hasPlayed === 'true') {
+            document.getElementById('loading').style.display = 'none';
+            showResultScreen(savedScore);
+        } else {
+            setTimeout(() => {
+                document.getElementById('loading').style.opacity = '0';
+                setTimeout(()=>document.getElementById('loading').style.display='none', 500);
+            }, 800);
+        }
+    };
+
+    let currentQ = 0;
+    let score = 0;
+    let playerName = "";
+
+    function startQuiz() {
+        const nameInput = document.getElementById('username').value;
+        if (!nameInput.trim()) return alert("Vui lòng nhập tên!");
+        playerName = nameInput.trim();
+        switchScreen('screen-quiz');
+        loadQuestion();
+    }
+
+    function loadQuestion() {
+        const q = quizData[currentQ];
+        document.getElementById('questionText').innerText = `Câu ${currentQ + 1}: ${q.q}`;
+        const ul = document.getElementById('optionsList');
+        ul.innerHTML = '';
+        ul.classList.remove('disabled');
+        document.getElementById('progressFill').style.width = `${((currentQ) / quizData.length) * 100}%`;
+
+        q.a.forEach((opt, index) => {
+            const li = document.createElement('li');
+            li.innerHTML = opt;
+            li.onclick = () => checkAnswer(index, li);
+            ul.appendChild(li);
+        });
+    }
+
+    function checkAnswer(index, li) {
+        const ul = document.getElementById('optionsList');
+        if(ul.classList.contains('disabled')) return;
+        ul.classList.add('disabled');
+        
+        const correctIndex = quizData[currentQ].correct;
+        if (index === correctIndex) {
+            li.classList.add('correct');
+            score++;
+        } else {
+            li.classList.add('wrong');
+            ul.children[correctIndex].classList.add('correct');
+        }
+
+        setTimeout(() => {
+            currentQ++;
+            if (currentQ < quizData.length) loadQuestion();
+            else finishGame();
+        }, 1200);
+    }
+
+    function finishGame() {
+        document.getElementById('progressFill').style.width = '100%';
+        
+        // Lưu trạng thái đã chơi
+        localStorage.setItem('quiz_played_status', 'true');
+        localStorage.setItem('quiz_score', score);
+
+        showResultScreen(score);
+        
+        // Chỉ gửi điểm lên, không tải bảng xếp hạng về
+        saveScoreToFirebase(playerName, score);
+        fireConfetti();
+    }
+
+    function showResultScreen(finalScore) {
+        switchScreen('screen-result');
+        document.getElementById('finalScore').innerText = finalScore ? `${finalScore}/${quizData.length}` : "Đã Thi";
+    }
+
+    function switchScreen(id) {
+        document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+    }
+
+    function saveScoreToFirebase(name, score) {
+        const newScoreRef = db.ref('scores').push();
+        newScoreRef.set({
+            name: name,
+            score: score,
+            timestamp: firebase.database.ServerValue.TIMESTAMP
+        });
+    }
+
+    function fireConfetti() {
+        var duration = 3 * 1000;
+        var animationEnd = Date.now() + duration;
+        var defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 0 };
+        var interval = setInterval(function() {
+            var timeLeft = animationEnd - Date.now();
+            if (timeLeft <= 0) return clearInterval(interval);
+            var particleCount = 50 * (timeLeft / duration);
+            confetti(Object.assign({}, defaults, { particleCount, origin: { x: Math.random(), y: Math.random() - 0.2 } }));
+        }, 250);
+    }
+
+    // --- NÚT RESET ẨN ĐỂ BẠN TEST LẠI (Nút nhỏ xíu góc trái dưới) ---
+    const resetBtn = document.createElement('button');
+    resetBtn.innerText = "↺";
+    resetBtn.style.position = "fixed"; resetBtn.style.bottom = "5px"; resetBtn.style.left = "5px";
+    resetBtn.style.opacity = "0.2"; resetBtn.style.border="none"; resetBtn.style.background="transparent";
+    resetBtn.onclick = () => {
+        if(confirm("Reset lượt chơi?")) {
+            localStorage.removeItem('quiz_played_status');
+            localStorage.removeItem('quiz_score');
+            location.reload();
+        }
+    };
+    document.body.appendChild(resetBtn);
+
+</script>
+
+</body>
+</html>
